@@ -35,17 +35,23 @@
   const { createClient } = supabase;
   const client = createClient('https://qjtkelvwfgnowohtohoc.supabase.co', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqdGtlbHZ3Zmdub3dvaHRvaG9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2Njk3NjAsImV4cCI6MjA5NTI0NTc2MH0.8PVoJ5wFOiu4HKuKmOLQdaKUsgaBvEVWwD2ydK8Y2TY');
 
-  // Supabase puts the session in the URL hash on redirect
-  client.auth.getSession();
+  client.auth.onAuthStateChange((event, session) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      document.getElementById('msg').textContent = 'Ready — enter your new password below.';
+    }
+  });
 
   async function reset() {
     const pw  = document.getElementById('pw').value;
     const pw2 = document.getElementById('pw2').value;
     const msg = document.getElementById('msg');
-    if (pw !== pw2)  { msg.textContent = 'Passwords do not match.'; return; }
+    if (pw !== pw2)    { msg.textContent = 'Passwords do not match.'; return; }
     if (pw.length < 6) { msg.textContent = 'Password must be at least 6 characters.'; return; }
+
     const { error } = await client.auth.updateUser({ password: pw });
-    msg.textContent = error ? error.message : '✓ Password updated — go back to the app and log in.';
+    msg.textContent = error
+      ? error.message
+      : '✓ Password updated — go back to the app and log in.';
   }
 </script>
 </body>
