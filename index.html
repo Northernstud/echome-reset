@@ -18,8 +18,10 @@
     button { width: 100%; padding: 14px; border: none; border-radius: 14px;
              background: linear-gradient(to bottom right, #C953FF, #FF005E);
              color: #F3F3F8; font-family: monospace; font-size: 14px;
-             font-weight: 700; cursor: pointer; }
+             font-weight: 700; cursor: pointer; transition: opacity 0.2s; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
     .msg { margin-top: 16px; font-size: 13px; color: #9B9BA8; text-align: center; }
+    .msg.error { color: #FF6B7A; }
   </style>
 </head>
 <body>
@@ -28,30 +30,87 @@
   <p>Choose a new password for your EchoMe account.</p>
   <input type="password" id="pw"  placeholder="New password" />
   <input type="password" id="pw2" placeholder="Confirm password" />
-  <button onclick="reset()">Set new password</button>
-  <div class="msg" id="msg"></div>
+  <button id="btn" onclick="reset()" disabled>Set new password</button>
+  <div class="msg" id="msg">Verifying reset link…</div>
 </div>
 <script>
   const { createClient } = supabase;
-  const client = createClient('https://qjtkelvwfgnowohtohoc.supabase.co', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqdGtlbHZ3Zmdub3dvaHRvaG9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2Njk3NjAsImV4cCI6MjA5NTI0NTc2MH0.8PVoJ5wFOiu4HKuKmOLQdaKUsgaBvEVWwD2ydK8Y2TY');
+  const client = createClient(
+    'https://qjtkelvwfgnowohtohoc.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqdGtlbHZ3Zmdub3dvaHRvaG9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2Njk3NjAsImV4cCI6MjA5NTI0NTc2MH0.8PVoJ5wFOiu4HKuKmOLQdaKUsgaBvEVWwD2ydK8Y2TY'
+  );
 
+  const btn = document.getElementById('btn');
+  const msg = document.getElementById('msg');
+  let sessionReady = false;
+
+  function setError(text) {
+    msg.textContent = text;
+    msg.classList.add('error');
+  }
+
+  function setInfo(text) {
+    msg.textContent = text;
+    msg.classList.remove('error');
+  }
+
+  // Step 1 — register the listener FIRST, before anything touches the session
   client.auth.onAuthStateChange((event, session) => {
     if (event === 'PASSWORD_RECOVERY') {
-      document.getElementById('msg').textContent = 'Ready — enter your new password below.';
+      sessionReady = true;
+      btn.disabled = false;
+      setInfo('Ready — enter your new password below.');
     }
   });
+
+  // Step 2 — manually parse the URL hash and call setSession() so we don't
+  // depend on detectSessionInUrl's internal timing
+  (async function initSession() {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const accessToken  = params.get('access_token');
+    const refreshToken = params.get('refresh_token') || '';
+    const type         = params.get('type');
+
+    if (type !== 'recovery' || !accessToken) {
+      setError('No reset token found. Please request a new password reset link from the app.');
+      return;
+    }
+
+    const { error } = await client.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    if (error) {
+      setError('This link has expired or has already been used. Please request a new reset link.');
+    }
+    // On success, onAuthStateChange fires PASSWORD_RECOVERY → enables the button
+  })();
 
   async function reset() {
     const pw  = document.getElementById('pw').value;
     const pw2 = document.getElementById('pw2').value;
-    const msg = document.getElementById('msg');
-    if (pw !== pw2)    { msg.textContent = 'Passwords do not match.'; return; }
-    if (pw.length < 6) { msg.textContent = 'Password must be at least 6 characters.'; return; }
+
+    if (pw !== pw2)    { setError('Passwords do not match.');                return; }
+    if (pw.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (!sessionReady) { setError('Session not ready — please wait a moment.'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Updating…';
+    msg.classList.remove('error');
 
     const { error } = await client.auth.updateUser({ password: pw });
-    msg.textContent = error
-      ? error.message
-      : '✓ Password updated — go back to the app and log in.';
+
+    if (error) {
+      setError(error.message);
+      btn.disabled = false;
+      btn.textContent = 'Set new password';
+    } else {
+      setInfo('✓ Password updated — go back to the app and log in.');
+      btn.textContent = 'Done ✓';
+      document.getElementById('pw').value  = '';
+      document.getElementById('pw2').value = '';
+    }
   }
 </script>
 </body>
