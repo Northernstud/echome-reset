@@ -37,63 +37,65 @@
   const { createClient } = supabase;
   const client = createClient(
     'https://qjtkelvwfgnowohtohoc.supabase.co',
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqdGtlbHZ3Zmdub3dvaHRvaG9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2Njk3NjAsImV4cCI6MjA5NTI0NTc2MH0.8PVoJ5wFOiu4HKuKmOLQdaKUsgaBvEVWwD2ydK8Y2TY'
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqdGtlbHZ3Zmdub3dvaHRvaG9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2Njk3NjAsImV4cCI6MjA5NTI0NTc2MH0.8PVoJ5wFOiu4HKuKmOLQdaKUsgaBvEVWwD2ydK8Y2TY',
+    { auth: { flowType: 'implicit' } }
   );
 
   const btn = document.getElementById('btn');
   const msg = document.getElementById('msg');
   let sessionReady = false;
 
-  function setError(text) {
-    msg.textContent = text;
-    msg.classList.add('error');
+  function setError(text) { msg.textContent = text; msg.classList.add('error'); }
+  function setInfo(text)  { msg.textContent = text; msg.classList.remove('error'); }
+
+  function enable() {
+    sessionReady = true;
+    btn.disabled = false;
+    setInfo('Ready — enter your new password below.');
   }
 
-  function setInfo(text) {
-    msg.textContent = text;
-    msg.classList.remove('error');
-  }
-
-  // Step 1 — register the listener FIRST, before anything touches the session
-  client.auth.onAuthStateChange((event, session) => {
-    if (event === 'PASSWORD_RECOVERY') {
-      sessionReady = true;
-      btn.disabled = false;
-      setInfo('Ready — enter your new password below.');
-    }
+  // Register the listener first so we never miss the PASSWORD_RECOVERY event.
+  client.auth.onAuthStateChange((event) => {
+    if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') enable();
   });
 
-  // Step 2 — manually parse the URL hash and call setSession() so we don't
-  // depend on detectSessionInUrl's internal timing
+  // Establish the session from the link. Implicit links carry tokens in the URL
+  // hash; we also fall back to a code exchange for older PKCE links.
   (async function initSession() {
-    const params = new URLSearchParams(window.location.hash.slice(1));
-    const accessToken  = params.get('access_token');
-    const refreshToken = params.get('refresh_token') || '';
-    const type         = params.get('type');
+    const hash  = new URLSearchParams(window.location.hash.slice(1));
+    const query = new URLSearchParams(window.location.search);
 
-    if (type !== 'recovery' || !accessToken) {
-      setError('No reset token found. Please request a new password reset link from the app.');
+    const accessToken  = hash.get('access_token');
+    const refreshToken = hash.get('refresh_token') || '';
+    const code         = query.get('code');
+
+    if (accessToken) {
+      const { error } = await client.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+      if (error) setError('This link has expired or was already used. Request a new reset link from the app.');
+      else enable();
       return;
     }
 
-    const { error } = await client.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    if (error) {
-      setError('This link has expired or has already been used. Please request a new reset link.');
+    if (code) {
+      const { error } = await client.auth.exchangeCodeForSession(code);
+      if (error) setError('This link can\'t be opened here. Please request a new reset link from the app.');
+      else enable();
+      return;
     }
-    // On success, onAuthStateChange fires PASSWORD_RECOVERY → enables the button
+
+    setError('No reset token found. Please request a new password reset link from the app.');
   })();
 
   async function reset() {
     const pw  = document.getElementById('pw').value;
     const pw2 = document.getElementById('pw2').value;
 
-    if (pw !== pw2)    { setError('Passwords do not match.');                return; }
-    if (pw.length < 6) { setError('Password must be at least 6 characters.'); return; }
-    if (!sessionReady) { setError('Session not ready — please wait a moment.'); return; }
+    if (pw !== pw2)     { setError('Passwords do not match.');                 return; }
+    if (pw.length < 6)  { setError('Password must be at least 6 characters.'); return; }
+    if (!sessionReady)  { setError('Session not ready — please wait a moment.'); return; }
 
     btn.disabled = true;
     btn.textContent = 'Updating…';
